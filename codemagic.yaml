@@ -1,0 +1,89 @@
+# ╔═══════════════════════════════════════════════════════╗
+# ║  PixelForge AI — Codemagic Build Pipeline             ║
+# ║  Generates signed APK + AAB ready for Play Store      ║
+# ╚═══════════════════════════════════════════════════════╝
+
+workflows:
+  android-release:
+    name: Android Release (APK + AAB)
+    max_build_duration: 90   # minutes
+    instance_type: mac_mini_m2  # Fastest available
+
+    triggering:
+      events:
+        - push
+        - tag
+      branch_patterns:
+        - pattern: main
+          include: true
+        - pattern: release/*
+          include: true
+
+    environment:
+      java: 17
+      node: 20.11.0
+      groups:
+        - keystore_credentials     # Add in Codemagic dashboard
+      vars:
+        PACKAGE_NAME:   "com.pixelforgeai"
+        BUILD_SCRIPT:   "./gradlew"
+        JAVA_HOME:      "/Library/Java/JavaVirtualMachines/temurin-17.jdk/Contents/Home"
+
+    cache:
+      cache_paths:
+        - $HOME/.gradle/caches
+        - $HOME/.m2
+        - node_modules
+        - android/.gradle
+
+    scripts:
+      # ── 1. Install Node dependencies ──────────────────────────
+      - name: Install NPM deps
+        script: |
+          node --version
+          npm --version
+          npm ci --prefer-offline
+
+      # ── 3. Bundle React Native JS ─────────────────────────────
+      - name: Bundle JS
+        script: |
+          npx react-native bundle \
+            --platform android \
+            --dev false \
+            --entry-file index.js \
+            --bundle-output android/app/src/main/assets/index.android.bundle \
+            --assets-dest android/app/src/main/res
+
+      # ── 4. Copy TFLite model to assets ────────────────────────
+      - name: Copy AI model
+        script: |
+          mkdir -p android/app/src/main/assets
+          cp -f assets/models/real_esrgan_x4_tiny.tflite \
+                android/app/src/main/assets/
+
+      # ── 5. Gradle Build ───────────────────────────────────────
+      - name: Build Android APK + AAB
+        script: |
+          cd android
+          chmod +x gradlew
+          ./gradlew clean
+          ./gradlew assembleRelease      # → APK
+          ./gradlew bundleRelease        # → AAB (Play Store)
+        environment:
+          MYAPP_UPLOAD_STORE_FILE:     $CM_KEYSTORE_PATH
+          MYAPP_UPLOAD_STORE_PASSWORD: $CM_KEYSTORE_PASSWORD
+          MYAPP_UPLOAD_KEY_ALIAS:      $CM_KEY_ALIAS
+          MYAPP_UPLOAD_KEY_PASSWORD:   $CM_KEY_PASSWORD
+
+    artifacts:
+      - android/app/build/outputs/apk/release/*.apk
+      - android/app/build/outputs/bundle/release/*.aab
+      - android/app/build/outputs/mapping/release/mapping.txt
+
+    publishing:
+      email:
+        recipients:
+          - orlymagency@gmail.com
+        notify:
+          success: true
+          failure: true
