@@ -6,28 +6,38 @@
 workflows:
   android-release:
     name: Android Release (APK + AAB)
-    max_build_duration: 90   # minutes
-    instance_type: mac_mini_m2  # Fastest available
+    max_build_duration: 90
+    instance_type: mac_mini_m2
 
     triggering:
       events:
         - push
         - tag
+
       branch_patterns:
         - pattern: main
           include: true
+
         - pattern: release/*
           include: true
 
     environment:
       java: 17
       node: 20.11.0
+
       groups:
-        - keystore_credentials     # Add in Codemagic dashboard
+        - keystore_credentials
+
       vars:
-        PACKAGE_NAME:   "com.pixelforgeai"
-        BUILD_SCRIPT:   "./gradlew"
-        JAVA_HOME:      "/Library/Java/JavaVirtualMachines/temurin-17.jdk/Contents/Home"
+        PACKAGE_NAME: "com.pixelforgeai"
+        BUILD_SCRIPT: "./gradlew"
+        JAVA_HOME: "/Library/Java/JavaVirtualMachines/temurin-17.jdk/Contents/Home"
+
+        # Signing variables
+        MYAPP_UPLOAD_STORE_FILE: $CM_KEYSTORE_PATH
+        MYAPP_UPLOAD_STORE_PASSWORD: $CM_KEYSTORE_PASSWORD
+        MYAPP_UPLOAD_KEY_ALIAS: $CM_KEY_ALIAS
+        MYAPP_UPLOAD_KEY_PASSWORD: $CM_KEY_PASSWORD
 
     cache:
       cache_paths:
@@ -37,6 +47,7 @@ workflows:
         - android/.gradle
 
     scripts:
+
       # ── 1. Install Node dependencies ──────────────────────────
       - name: Install NPM deps
         script: |
@@ -44,9 +55,11 @@ workflows:
           npm --version
           npm ci --prefer-offline
 
-      # ── 3. Bundle React Native JS ─────────────────────────────
+      # ── 2. Bundle React Native JS ─────────────────────────────
       - name: Bundle JS
         script: |
+          mkdir -p android/app/src/main/assets
+
           npx react-native bundle \
             --platform android \
             --dev false \
@@ -54,26 +67,24 @@ workflows:
             --bundle-output android/app/src/main/assets/index.android.bundle \
             --assets-dest android/app/src/main/res
 
-      # ── 4. Copy TFLite model to assets ────────────────────────
+      # ── 3. Copy TFLite model to assets ────────────────────────
       - name: Copy AI model
         script: |
           mkdir -p android/app/src/main/assets
+
           cp -f assets/models/real_esrgan_x4_tiny.tflite \
                 android/app/src/main/assets/
 
-      # ── 5. Gradle Build ───────────────────────────────────────
+      # ── 4. Gradle Build ───────────────────────────────────────
       - name: Build Android APK + AAB
         script: |
           cd android
+
           chmod +x gradlew
+
           ./gradlew clean
-          ./gradlew assembleRelease      # → APK
-          ./gradlew bundleRelease        # → AAB (Play Store)
-        environment:
-          MYAPP_UPLOAD_STORE_FILE:     $CM_KEYSTORE_PATH
-          MYAPP_UPLOAD_STORE_PASSWORD: $CM_KEYSTORE_PASSWORD
-          MYAPP_UPLOAD_KEY_ALIAS:      $CM_KEY_ALIAS
-          MYAPP_UPLOAD_KEY_PASSWORD:   $CM_KEY_PASSWORD
+          ./gradlew assembleRelease
+          ./gradlew bundleRelease
 
     artifacts:
       - android/app/build/outputs/apk/release/*.apk
@@ -84,6 +95,7 @@ workflows:
       email:
         recipients:
           - orlymagency@gmail.com
+
         notify:
           success: true
           failure: true
