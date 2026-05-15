@@ -1,0 +1,206 @@
+/**
+ * MetadataScreen.js
+ * Deep metadata editing UI — Elite Dark
+ */
+
+import React, { useState } from 'react';
+import {
+  View, Text, TouchableOpacity, StyleSheet,
+  ScrollView, TextInput, Alert, Switch
+} from 'react-native';
+import LinearGradient from 'react-native-linear-gradient';
+import { launchImageLibrary } from 'react-native-image-picker';
+import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
+import DateTimePicker from '@react-native-community/datetimepicker';
+import { spoofMetadata, spoofVideoMetadata, DeviceProfiles, GPSPresets } from '../modules/MetadataSpoofer';
+import { COLORS, FONTS } from '../theme';
+
+export default function MetadataScreen({ navigation }) {
+  const [fileUri,       setFileUri]       = useState(null);
+  const [fileType,      setFileType]      = useState('image');
+  const [deviceKey,     setDeviceKey]     = useState('IPHONE_15_PRO');
+  const [gpsKey,        setGpsKey]        = useState('STRIP');
+  const [customLat,     setCustomLat]     = useState('');
+  const [customLon,     setCustomLon]     = useState('');
+  const [customDate,    setCustomDate]    = useState(new Date());
+  const [showDatePicker,setShowDatePicker]= useState(false);
+  const [stripAll,      setStripAll]      = useState(false);
+  const [processing,    setProcessing]    = useState(false);
+
+  const pickFile = async (type) => {
+    const result = await launchImageLibrary({ mediaType: type === 'video' ? 'video' : 'photo', quality: 1 });
+    if (result.assets?.[0]) {
+      setFileUri(result.assets[0].uri);
+      setFileType(type);
+    }
+  };
+
+  const handleSpoof = async () => {
+    if (!fileUri) { Alert.alert('Fichier manquant', 'Sélectionnez un fichier.'); return; }
+    setProcessing(true);
+    try {
+      const customGPS = gpsKey === 'CUSTOM' && customLat && customLon
+        ? { lat: parseFloat(customLat), lon: parseFloat(customLon), alt: 10 }
+        : null;
+
+      const fn = fileType === 'video' ? spoofVideoMetadata : spoofMetadata;
+      const outputUri = await fn(fileUri, {
+        deviceProfileKey: deviceKey,
+        gpsPresetKey:     gpsKey,
+        customGPS,
+        customDate:       customDate.toISOString(),
+        stripAllMeta:     stripAll,
+      });
+
+      navigation.navigate('Result', { outputUri, type: fileType, mode: 'metadata' });
+    } catch (err) {
+      Alert.alert('Erreur', err.message);
+    } finally {
+      setProcessing(false);
+    }
+  };
+
+  return (
+    <ScrollView style={styles.container} showsVerticalScrollIndicator={false}>
+      <LinearGradient colors={['#000', '#0A0A1A']} style={styles.header}>
+        <Text style={styles.title}>Meta <Text style={styles.accent}>Spoofer</Text></Text>
+        <Text style={styles.subtitle}>Réécriture EXIF • GPS • Device Signature</Text>
+      </LinearGradient>
+
+      {/* File Picker */}
+      <Section title="01 — SOURCE">
+        <View style={styles.row}>
+          <PickBtn label="Photo" icon="image" onPress={() => pickFile('image')} active={fileType === 'image' && !!fileUri} />
+          <PickBtn label="Vidéo" icon="video" onPress={() => pickFile('video')} active={fileType === 'video' && !!fileUri} />
+        </View>
+        {fileUri && <Text style={styles.fileHint} numberOfLines={1}>✓ {fileUri.split('/').pop()}</Text>}
+      </Section>
+
+      {/* Strip All Toggle */}
+      <Section title="02 — MODE">
+        <View style={styles.toggleRow}>
+          <Text style={styles.toggleLabel}>🧹 Supprimer toutes les métadonnées</Text>
+          <Switch value={stripAll} onValueChange={setStripAll} trackColor={{ true: COLORS.neonBlue }} />
+        </View>
+      </Section>
+
+      {/* Device Profile */}
+      {!stripAll && (
+        <Section title="03 — PROFIL APPAREIL">
+          {Object.entries(DeviceProfiles).map(([key, p]) => (
+            <TouchableOpacity
+              key={key}
+              style={[styles.profileBtn, deviceKey === key && styles.profileBtnActive]}
+              onPress={() => setDeviceKey(key)}
+            >
+              <Text style={styles.profileIcon}>{p.icon}</Text>
+              <View style={{ flex: 1 }}>
+                <Text style={styles.profileLabel}>{p.label}</Text>
+                {p.model ? <Text style={styles.profileSub}>{p.make} • {p.software}</Text> : null}
+              </View>
+              {deviceKey === key && <Icon name="check-circle" size={18} color={COLORS.neonBlue} />}
+            </TouchableOpacity>
+          ))}
+        </Section>
+      )}
+
+      {/* GPS Preset */}
+      {!stripAll && (
+        <Section title="04 — LOCALISATION GPS">
+          <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginBottom: 8 }}>
+            {Object.entries(GPSPresets).map(([key, g]) => (
+              <TouchableOpacity
+                key={key}
+                style={[styles.gpsChip, gpsKey === key && styles.gpsChipActive]}
+                onPress={() => setGpsKey(key)}
+              >
+                <Text style={[styles.gpsChipText, gpsKey === key && { color: COLORS.neonBlue }]}>{g.label}</Text>
+              </TouchableOpacity>
+            ))}
+          </ScrollView>
+          {gpsKey === 'CUSTOM' && (
+            <View style={styles.row}>
+              <TextInput style={[styles.input, { flex: 1 }]} placeholder="Latitude" placeholderTextColor="#444" value={customLat} onChangeText={setCustomLat} keyboardType="numeric" />
+              <TextInput style={[styles.input, { flex: 1 }]} placeholder="Longitude" placeholderTextColor="#444" value={customLon} onChangeText={setCustomLon} keyboardType="numeric" />
+            </View>
+          )}
+        </Section>
+      )}
+
+      {/* Date Override */}
+      {!stripAll && (
+        <Section title="05 — DATE & HEURE">
+          <TouchableOpacity style={styles.dateBtn} onPress={() => setShowDatePicker(true)}>
+            <Icon name="calendar-clock" size={20} color={COLORS.neonBlue} />
+            <Text style={styles.dateBtnText}>{customDate.toLocaleString('fr-FR')}</Text>
+          </TouchableOpacity>
+          {showDatePicker && (
+            <DateTimePicker value={customDate} mode="datetime" display="spinner" onChange={(_, d) => { setShowDatePicker(false); if (d) setCustomDate(d); }} />
+          )}
+        </Section>
+      )}
+
+      {/* Execute */}
+      <TouchableOpacity style={styles.execBtn} onPress={handleSpoof} disabled={processing}>
+        <LinearGradient colors={['#7B2FFF', '#4A00CC']} style={styles.execGrad}>
+          <Icon name="shield-check" size={22} color="#fff" />
+          <Text style={styles.execText}>{processing ? 'Réécriture en cours...' : 'Appliquer le Spoofing'}</Text>
+        </LinearGradient>
+      </TouchableOpacity>
+
+      <View style={{ height: 60 }} />
+    </ScrollView>
+  );
+}
+
+function Section({ title, children }) {
+  return (
+    <View style={sS.wrap}>
+      <Text style={sS.title}>{title}</Text>
+      {children}
+    </View>
+  );
+}
+
+function PickBtn({ label, icon, onPress, active }) {
+  return (
+    <TouchableOpacity style={[sS.pickBtn, active && sS.pickBtnActive]} onPress={onPress}>
+      <Icon name={icon} size={24} color={active ? COLORS.neonBlue : '#444'} />
+      <Text style={[sS.pickLabel, active && { color: COLORS.neonBlue }]}>{label}</Text>
+    </TouchableOpacity>
+  );
+}
+
+const sS = StyleSheet.create({
+  wrap:      { paddingHorizontal: 24, marginTop: 24 },
+  title:     { fontSize: 11, color: '#444', fontFamily: FONTS.bold, letterSpacing: 2, marginBottom: 12 },
+  pickBtn:   { flex: 1, backgroundColor: '#0A0A14', borderRadius: 12, paddingVertical: 18, alignItems: 'center', borderWidth: 1, borderColor: '#1A1A2E' },
+  pickBtnActive: { borderColor: COLORS.neonBlue },
+  pickLabel: { color: '#666', marginTop: 6, fontFamily: FONTS.medium },
+});
+
+const styles = StyleSheet.create({
+  container:      { flex: 1, backgroundColor: '#000' },
+  header:         { paddingTop: 60, paddingBottom: 30, paddingHorizontal: 24 },
+  title:          { fontSize: 32, fontWeight: '800', color: '#fff', fontFamily: FONTS.bold },
+  accent:         { color: '#7B2FFF' },
+  subtitle:       { fontSize: 13, color: '#555', marginTop: 6 },
+  row:            { flexDirection: 'row', gap: 12 },
+  fileHint:       { color: '#00FF88', fontSize: 12, marginTop: 10, fontFamily: FONTS.regular },
+  toggleRow:      { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', backgroundColor: '#0A0A14', borderRadius: 12, padding: 16, borderWidth: 1, borderColor: '#1A1A2E' },
+  toggleLabel:    { color: '#ccc', fontFamily: FONTS.medium },
+  profileBtn:     { flexDirection: 'row', alignItems: 'center', backgroundColor: '#0A0A14', borderRadius: 12, padding: 16, marginBottom: 8, borderWidth: 1, borderColor: '#1A1A2E', gap: 12 },
+  profileBtnActive: { borderColor: '#7B2FFF' },
+  profileIcon:    { fontSize: 24 },
+  profileLabel:   { color: '#fff', fontFamily: FONTS.medium },
+  profileSub:     { color: '#555', fontSize: 11, marginTop: 2 },
+  gpsChip:        { backgroundColor: '#0A0A14', borderRadius: 20, paddingHorizontal: 16, paddingVertical: 8, marginRight: 8, borderWidth: 1, borderColor: '#1A1A2E' },
+  gpsChipActive:  { borderColor: COLORS.neonBlue },
+  gpsChipText:    { color: '#666', fontFamily: FONTS.medium, fontSize: 12 },
+  input:          { backgroundColor: '#0A0A14', borderRadius: 12, borderWidth: 1, borderColor: '#1A1A2E', color: '#fff', padding: 14, fontFamily: FONTS.regular },
+  dateBtn:        { flexDirection: 'row', alignItems: 'center', gap: 12, backgroundColor: '#0A0A14', borderRadius: 12, padding: 16, borderWidth: 1, borderColor: '#1A1A2E' },
+  dateBtnText:    { color: '#fff', fontFamily: FONTS.medium },
+  execBtn:        { marginHorizontal: 24, marginTop: 32, borderRadius: 16, overflow: 'hidden' },
+  execGrad:       { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', paddingVertical: 18, gap: 10 },
+  execText:       { color: '#fff', fontSize: 16, fontWeight: '700', fontFamily: FONTS.bold },
+});

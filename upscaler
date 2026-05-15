@@ -1,0 +1,194 @@
+/**
+ * UpscalerScreen.js — Elite Dark UI
+ * Photo & Video AI Upscaling with Real-ESRGAN
+ */
+
+import React, { useState, useRef } from 'react';
+import {
+  View, Text, TouchableOpacity, StyleSheet,
+  ScrollView, Image, Dimensions, Alert
+} from 'react-native';
+import Animated, {
+  useSharedValue, useAnimatedStyle,
+  withSpring, withTiming, interpolate
+} from 'react-native-reanimated';
+import LinearGradient from 'react-native-linear-gradient';
+import { launchImageLibrary } from 'react-native-image-picker';
+import * as Progress from 'react-native-progress';
+import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
+import { upscaleImage, upscaleVideo, ScaleMode } from '../modules/IAProcessor';
+import { COLORS, FONTS } from '../theme';
+
+const { width } = Dimensions.get('window');
+
+const SCALE_OPTIONS = [
+  { key: 'X2', label: '2K', sub: '2560×1440', color: '#00D1FF' },
+  { key: 'X4', label: '4K', sub: '3840×2160', color: '#7B2FFF' },
+  { key: 'X8', label: '8K', sub: '7680×4320', color: '#FF2F7B' },
+];
+
+export default function UpscalerScreen({ navigation }) {
+  const [mediaUri,    setMediaUri]    = useState(null);
+  const [mediaType,   setMediaType]   = useState('image');
+  const [scaleKey,    setScaleKey]    = useState('X4');
+  const [processing,  setProcessing]  = useState(false);
+  const [progress,    setProgress]    = useState(0);
+  const [statusText,  setStatusText]  = useState('');
+
+  const glowAnim = useSharedValue(0);
+
+  const handlePickMedia = async (type) => {
+    const result = await launchImageLibrary({
+      mediaType: type === 'video' ? 'video' : 'photo',
+      quality: 1,
+    });
+    if (result.assets?.[0]) {
+      setMediaUri(result.assets[0].uri);
+      setMediaType(type);
+    }
+  };
+
+  const handleProcess = async () => {
+    if (!mediaUri) {
+      Alert.alert('Sélectionnez un fichier', 'Choisissez une photo ou vidéo d'abord.');
+      return;
+    }
+    setProcessing(true);
+    setProgress(0);
+    glowAnim.value = withTiming(1, { duration: 500 });
+
+    try {
+      const statusMessages = [
+        'Chargement du modèle Real-ESRGAN...',
+        'Analyse des pixels source...',
+        'Inférence IA en cours...',
+        'Super-résolution appliquée...',
+        'Optimisation finale...',
+        'Export haute fidélité...',
+      ];
+      let msgIdx = 0;
+      const msgInterval = setInterval(() => {
+        setStatusText(statusMessages[msgIdx % statusMessages.length]);
+        msgIdx++;
+      }, 2000);
+
+      const outputUri = mediaType === 'video'
+        ? await upscaleVideo(mediaUri, scaleKey, setProgress)
+        : await upscaleImage(mediaUri, scaleKey, setProgress);
+
+      clearInterval(msgInterval);
+      setStatusText('Traitement terminé ✓');
+      glowAnim.value = withTiming(0, { duration: 500 });
+
+      navigation.navigate('Result', { outputUri, type: mediaType, scale: scaleKey });
+
+    } catch (err) {
+      Alert.alert('Erreur', err.message);
+    } finally {
+      setProcessing(false);
+    }
+  };
+
+  const glowStyle = useAnimatedStyle(() => ({
+    shadowOpacity: interpolate(glowAnim.value, [0, 1], [0.3, 1]),
+    shadowRadius:  interpolate(glowAnim.value, [0, 1], [8, 30]),
+  }));
+
+  return (
+    <ScrollView style={styles.container} showsVerticalScrollIndicator={false}>
+      <LinearGradient colors={['#000000', '#0A0A1A']} style={styles.header}>
+        <Text style={styles.title}>PixelForge <Text style={styles.ai}>AI</Text></Text>
+        <Text style={styles.subtitle}>Super-résolution on-device • Real-ESRGAN</Text>
+      </LinearGradient>
+
+      {/* Media Picker Buttons */}
+      <View style={styles.pickerRow}>
+        <TouchableOpacity style={styles.pickerBtn} onPress={() => handlePickMedia('image')}>
+          <Icon name="image-plus" size={28} color={COLORS.neonBlue} />
+          <Text style={styles.pickerLabel}>Photo</Text>
+        </TouchableOpacity>
+        <TouchableOpacity style={styles.pickerBtn} onPress={() => handlePickMedia('video')}>
+          <Icon name="video-plus" size={28} color="#7B2FFF" />
+          <Text style={styles.pickerLabel}>Vidéo</Text>
+        </TouchableOpacity>
+      </View>
+
+      {/* Preview */}
+      {mediaUri && mediaType === 'image' && (
+        <Image source={{ uri: mediaUri }} style={styles.preview} resizeMode="cover" />
+      )}
+
+      {/* Scale Selector */}
+      <View style={styles.scaleRow}>
+        {SCALE_OPTIONS.map(opt => (
+          <TouchableOpacity
+            key={opt.key}
+            style={[styles.scaleBtn, scaleKey === opt.key && { borderColor: opt.color, borderWidth: 2 }]}
+            onPress={() => setScaleKey(opt.key)}
+          >
+            <Text style={[styles.scaleLabel, { color: opt.color }]}>{opt.label}</Text>
+            <Text style={styles.scaleSub}>{opt.sub}</Text>
+          </TouchableOpacity>
+        ))}
+      </View>
+
+      {/* Process Button */}
+      <Animated.View style={[styles.processWrap, glowStyle]}>
+        <TouchableOpacity
+          style={[styles.processBtn, processing && styles.processBtnDisabled]}
+          onPress={handleProcess}
+          disabled={processing}
+        >
+          <LinearGradient
+            colors={processing ? ['#1A1A2E', '#0D0D1A'] : ['#00D1FF', '#0088BB']}
+            style={styles.processBtnGrad}
+          >
+            <Icon name={processing ? 'cog' : 'rocket-launch'} size={22} color="#fff" />
+            <Text style={styles.processBtnText}>
+              {processing ? 'Traitement en cours...' : `Upscale en ${ScaleMode[scaleKey].label}`}
+            </Text>
+          </LinearGradient>
+        </TouchableOpacity>
+      </Animated.View>
+
+      {/* Progress */}
+      {processing && (
+        <View style={styles.progressWrap}>
+          <Progress.Bar
+            progress={progress / 100}
+            width={width - 48}
+            color={COLORS.neonBlue}
+            unfilledColor="#1A1A2E"
+            borderColor="transparent"
+            height={6}
+            borderRadius={4}
+          />
+          <Text style={styles.progressText}>{Math.round(progress)}% — {statusText}</Text>
+        </View>
+      )}
+    </ScrollView>
+  );
+}
+
+const styles = StyleSheet.create({
+  container:      { flex: 1, backgroundColor: '#000' },
+  header:         { paddingTop: 60, paddingBottom: 30, paddingHorizontal: 24 },
+  title:          { fontSize: 32, fontWeight: '800', color: '#fff', fontFamily: FONTS.bold },
+  ai:             { color: COLORS.neonBlue },
+  subtitle:       { fontSize: 13, color: '#555', marginTop: 6, fontFamily: FONTS.regular },
+  pickerRow:      { flexDirection: 'row', paddingHorizontal: 24, gap: 16, marginTop: 24 },
+  pickerBtn:      { flex: 1, backgroundColor: '#0A0A14', borderRadius: 16, paddingVertical: 24, alignItems: 'center', borderWidth: 1, borderColor: '#1A1A2E' },
+  pickerLabel:    { color: '#fff', marginTop: 8, fontFamily: FONTS.medium },
+  preview:        { width: width - 48, height: 200, borderRadius: 16, marginHorizontal: 24, marginTop: 20 },
+  scaleRow:       { flexDirection: 'row', paddingHorizontal: 24, gap: 12, marginTop: 24 },
+  scaleBtn:       { flex: 1, backgroundColor: '#0A0A14', borderRadius: 12, padding: 16, alignItems: 'center', borderWidth: 1, borderColor: '#1A1A2E' },
+  scaleLabel:     { fontSize: 20, fontWeight: '800', fontFamily: FONTS.bold },
+  scaleSub:       { fontSize: 10, color: '#444', marginTop: 4, fontFamily: FONTS.regular },
+  processWrap:    { marginHorizontal: 24, marginTop: 24, shadowColor: COLORS.neonBlue, elevation: 12 },
+  processBtn:     { borderRadius: 16, overflow: 'hidden' },
+  processBtnGrad: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', paddingVertical: 18, gap: 10 },
+  processBtnText: { color: '#fff', fontSize: 16, fontWeight: '700', fontFamily: FONTS.bold },
+  progressWrap:   { paddingHorizontal: 24, marginTop: 20, marginBottom: 40 },
+  progressText:   { color: '#555', fontSize: 12, marginTop: 10, fontFamily: FONTS.regular },
+  processBtnDisabled: { opacity: 0.7 },
+});

@@ -1,0 +1,108 @@
+/**
+ * PixelForge AI — App.js
+ * Entry point with navigation & Elite Dark UI
+ */
+
+import React, { useEffect } from 'react';
+import { StatusBar, LogBox } from 'react-native';
+import { NavigationContainer } from '@react-navigation/native';
+import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
+import { createStackNavigator } from '@react-navigation/stack';
+import { GestureHandlerRootView } from 'react-native-gesture-handler';
+import { SafeAreaProvider } from 'react-native-safe-area-context';
+import Animated, { useSharedValue, withSpring } from 'react-native-reanimated';
+import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
+
+// Screens
+import HomeScreen       from './screens/HomeScreen';
+import UpscalerScreen   from './screens/UpscalerScreen';
+import MetadataScreen   from './screens/MetadataScreen';
+import ResultScreen     from './screens/ResultScreen';
+import SettingsScreen   from './screens/SettingsScreen';
+
+// Theme
+import { COLORS, FONTS } from './theme';
+
+LogBox.ignoreLogs(['new NativeEventEmitter']);
+
+const Tab   = createBottomTabNavigator();
+const Stack = createStackNavigator();
+
+// ─── Main Tab Navigator ────────────────────────────────────────────────────
+function MainTabs() {
+  return (
+    <Tab.Navigator
+      screenOptions={({ route }) => ({
+        headerShown: false,
+        tabBarStyle: {
+          backgroundColor: '#0A0A0A',
+          borderTopColor: '#1A1A2E',
+          borderTopWidth: 1,
+          height: 70,
+          paddingBottom: 10,
+          paddingTop: 8,
+        },
+        tabBarActiveTintColor: COLORS.neonBlue,
+        tabBarInactiveTintColor: '#444',
+        tabBarLabelStyle: {
+          fontFamily: FONTS.medium,
+          fontSize: 11,
+          letterSpacing: 0.5,
+        },
+        tabBarIcon: ({ focused, color }) => {
+          const icons = {
+            Home:     'home-variant',
+            Upscaler: 'image-filter-hdr',
+            Metadata: 'shield-edit',
+            Settings: 'cog-outline',
+          };
+          return (
+            <Icon
+              name={icons[route.name]}
+              size={focused ? 26 : 22}
+              color={color}
+            />
+          );
+        },
+      })}
+    >
+      <Tab.Screen name="Home"     component={HomeScreen}     />
+      <Tab.Screen name="Upscaler" component={UpscalerScreen} />
+      <Tab.Screen name="Metadata" component={MetadataScreen} />
+      <Tab.Screen name="Settings" component={SettingsScreen} />
+    </Tab.Navigator>
+  );
+}
+
+// ─── Root Stack ────────────────────────────────────────────────────────────
+export default function App() {
+  useEffect(() => {
+    StatusBar.setBarStyle('light-content');
+    StatusBar.setBackgroundColor('#000000');
+  }, []);
+
+  return (
+    <GestureHandlerRootView style={{ flex: 1 }}>
+      <SafeAreaProvider>
+        <NavigationContainer
+          theme={{
+            dark: true,
+            colors: {
+              primary:    COLORS.neonBlue,
+              background: '#000000',
+              card:       '#0A0A0A',
+              text:       '#FFFFFF',
+              border:     '#1A1A2E',
+              notification: COLORS.neonBlue,
+            },
+          }}
+        >
+          <Stack.Navigator screenOptions={{ headerShown: false }}>
+            <Stack.Screen name="Main"   component={MainTabs}    />
+            <Stack.Screen name="Result" component={ResultScreen} />
+          </Stack.Navigator>
+        </NavigationContainer>
+      </SafeAreaProvider>
+    </GestureHandlerRootView>
+  );
+}

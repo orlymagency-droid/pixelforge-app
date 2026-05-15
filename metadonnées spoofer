@@ -1,0 +1,268 @@
+/**
+ * MetadataSpoofer.js
+ * Deep EXIF/GPS/Device metadata manipulation
+ * Uses ffmpeg-kit-react-native for binary-level rewriting
+ */
+
+import { FFmpegKit, ReturnCode } from 'ffmpeg-kit-react-native';
+import RNFS from 'react-native-fs';
+
+// ─── Device Profiles (presets) ─────────────────────────────────────────────
+export const DeviceProfiles = {
+  IPHONE_15_PRO: {
+    label: 'iPhone 15 Pro',
+    icon: '🍎',
+    make:           'Apple',
+    model:          'iPhone 15 Pro',
+    software:       '17.4.1',
+    lensMake:       'Apple',
+    lensModel:      'iPhone 15 Pro back triple camera 6.765mm f/2.8',
+    fNumber:        'f/2.8',
+    focalLength:    '6.765',
+    iso:            '50',
+    exposureTime:   '1/3030',
+    brightnessValue:'10.5',
+    colorSpace:     'sRGB',
+    xResolution:    '72',
+    yResolution:    '72',
+    resUnit:        '2',
+    flash:          '16',
+    whiteBalance:   '0',
+    meteringMode:   '5',
+    sceneCaptureType: '0',
+    dpiX: 264, dpiY: 264,
+  },
+
+  SAMSUNG_S24_ULTRA: {
+    label: 'Samsung S24 Ultra',
+    icon: '🤖',
+    make:           'Samsung',
+    model:          'SM-S928B',
+    software:       'One UI 6.1',
+    lensMake:       'Samsung',
+    lensModel:      'Galaxy S24 Ultra rear camera 10mm f/3.4',
+    fNumber:        'f/3.4',
+    focalLength:    '10',
+    iso:            '50',
+    exposureTime:   '1/2500',
+    brightnessValue:'11.0',
+    colorSpace:     'sRGB',
+    xResolution:    '72',
+    yResolution:    '72',
+    resUnit:        '2',
+    flash:          '0',
+    whiteBalance:   '0',
+    meteringMode:   '2',
+    sceneCaptureType: '0',
+    dpiX: 360, dpiY: 360,
+  },
+
+  GOOGLE_PIXEL_9_PRO: {
+    label: 'Google Pixel 9 Pro',
+    icon: '📷',
+    make:           'Google',
+    model:          'Pixel 9 Pro',
+    software:       'Android 15',
+    lensMake:       'Google',
+    lensModel:      'Pixel 9 Pro rear camera 6.81mm f/1.68',
+    fNumber:        'f/1.68',
+    focalLength:    '6.81',
+    iso:            '46',
+    exposureTime:   '1/2000',
+    brightnessValue:'9.8',
+    colorSpace:     'sRGB',
+    xResolution:    '72',
+    yResolution:    '72',
+    resUnit:        '2',
+    flash:          '0',
+    whiteBalance:   '0',
+    meteringMode:   '5',
+    sceneCaptureType: '0',
+    dpiX: 411, dpiY: 411,
+  },
+
+  CLEAN: {
+    label: 'Strip All Metadata',
+    icon: '🧹',
+    make:    '',
+    model:   '',
+    software:'',
+    // All fields emptied
+  },
+};
+
+// ─── GPS Locations (presets) ───────────────────────────────────────────────
+export const GPSPresets = {
+  PARIS:      { label: 'Paris, France',       lat: 48.8566, lon: 2.3522,   alt: 35  },
+  NYC:        { label: 'New York, USA',        lat: 40.7128, lon: -74.0060, alt: 10  },
+  TOKYO:      { label: 'Tokyo, Japan',         lat: 35.6762, lon: 139.6503, alt: 40  },
+  DUBAI:      { label: 'Dubai, UAE',           lat: 25.2048, lon: 55.2708,  alt: 5   },
+  LONDON:     { label: 'London, UK',           lat: 51.5074, lon: -0.1278,  alt: 11  },
+  SYDNEY:     { label: 'Sydney, Australia',    lat: -33.8688, lon: 151.2093,alt: 58  },
+  CUSTOM:     { label: 'Coordonnées manuelles',lat: 0, lon: 0,              alt: 0   },
+  STRIP:      { label: 'Supprimer GPS',        lat: null, lon: null,        alt: null},
+};
+
+// ─── Core Spoofer ──────────────────────────────────────────────────────────
+/**
+ * Apply full metadata spoofing to an image file
+ * @param {string}  inputUri    — source file URI (local)
+ * @param {object}  options
+ * @param {string}  options.deviceProfileKey  — key from DeviceProfiles
+ * @param {string}  options.gpsPresetKey      — key from GPSPresets
+ * @param {object}  options.customGPS         — { lat, lon, alt }
+ * @param {string}  options.customDate        — ISO date string
+ * @param {string}  options.customMake        — override make
+ * @param {string}  options.customModel       — override model
+ * @param {boolean} options.stripAllMeta      — nuclear option: strip everything
+ * @returns {Promise<string>} output file URI
+ */
+export async function spoofMetadata(inputUri, options = {}) {
+  const {
+    deviceProfileKey = 'IPHONE_15_PRO',
+    gpsPresetKey     = 'STRIP',
+    customGPS        = null,
+    customDate       = null,
+    customMake       = null,
+    customModel      = null,
+    stripAllMeta     = false,
+  } = options;
+
+  const outDir    = RNFS.ExternalDirectoryPath || RNFS.DocumentDirectoryPath;
+  const timestamp = Date.now();
+  const extension = inputUri.split('.').pop().toLowerCase();
+  const outputUri = `${outDir}/spoofed_${timestamp}.${extension}`;
+
+  if (stripAllMeta) {
+    return stripAllMetadata(inputUri, outputUri);
+  }
+
+  const profile = DeviceProfiles[deviceProfileKey] || DeviceProfiles.IPHONE_15_PRO;
+  const gps     = customGPS || GPSPresets[gpsPresetKey];
+  const date    = customDate || generateRealisticDate();
+
+  const make  = customMake  || profile.make;
+  const model = customModel || profile.model;
+
+  // Build FFmpeg metadata map
+  const metaArgs = buildMetadataArgs(profile, gps, date, make, model);
+
+  // FFmpeg command: copy stream, rewrite metadata
+  const cmd = [
+    `-i "${inputUri}"`,
+    `-map 0`,
+    `-map_metadata -1`,   // strip existing first
+    `-c:v copy`,           // no re-encode (preserve quality)
+    metaArgs,
+    `-y "${outputUri}"`
+  ].join(' ');
+
+  const session = await FFmpegKit.execute(cmd);
+  const rc      = await session.getReturnCode();
+
+  if (!ReturnCode.isSuccess(rc)) {
+    const logs = await session.getAllLogsAsString();
+    throw new Error(`FFmpeg spoofing failed: ${logs}`);
+  }
+
+  return `file://${outputUri}`;
+}
+
+// ─── Video Metadata Spoofer ────────────────────────────────────────────────
+export async function spoofVideoMetadata(inputUri, options = {}) {
+  const outDir    = RNFS.ExternalDirectoryPath || RNFS.DocumentDirectoryPath;
+  const timestamp = Date.now();
+  const outputUri = `${outDir}/spoofed_video_${timestamp}.mp4`;
+
+  const profile   = DeviceProfiles[options.deviceProfileKey || 'IPHONE_15_PRO'];
+  const date      = options.customDate || generateRealisticDate();
+
+  // MP4 metadata tags (QuickTime/iTunes atoms)
+  const cmd = [
+    `-i "${inputUri}"`,
+    `-map 0 -map_metadata -1`,
+    `-c copy`,
+    `-metadata creation_time="${date}"`,
+    `-metadata make="${profile.make}"`,
+    `-metadata model="${profile.model}"`,
+    `-metadata software="${profile.software}"`,
+    `-metadata encoder="${profile.make} ${profile.model}"`,
+    `-movflags use_metadata_tags`,
+    `-y "${outputUri}"`
+  ].join(' ');
+
+  const session = await FFmpegKit.execute(cmd);
+  const rc      = await session.getReturnCode();
+  if (!ReturnCode.isSuccess(rc)) throw new Error('Video metadata spoofing failed');
+
+  return `file://${outputUri}`;
+}
+
+// ─── Strip All Metadata (nuclear) ─────────────────────────────────────────
+async function stripAllMetadata(inputUri, outputUri) {
+  const cmd = [
+    `-i "${inputUri}"`,
+    `-map 0 -map_metadata -1`,
+    `-c:v copy`,
+    `-y "${outputUri}"`
+  ].join(' ');
+
+  const session = await FFmpegKit.execute(cmd);
+  if (!ReturnCode.isSuccess(await session.getReturnCode())) {
+    throw new Error('Strip metadata failed');
+  }
+  return `file://${outputUri}`;
+}
+
+// ─── Helpers ───────────────────────────────────────────────────────────────
+function buildMetadataArgs(profile, gps, date, make, model) {
+  const args = [
+    `-metadata Make="${make}"`,
+    `-metadata Model="${model}"`,
+    `-metadata Software="${profile.software || ''}"`,
+    `-metadata DateTime="${formatExifDate(date)}"`,
+    `-metadata DateTimeOriginal="${formatExifDate(date)}"`,
+    `-metadata DateTimeDigitized="${formatExifDate(date)}"`,
+    `-metadata LensMake="${profile.lensMake || ''}"`,
+    `-metadata LensModel="${profile.lensModel || ''}"`,
+    `-metadata FNumber="${profile.fNumber || ''}"`,
+    `-metadata FocalLength="${profile.focalLength || ''}"`,
+    `-metadata ISOSpeedRatings="${profile.iso || ''}"`,
+    `-metadata ExposureTime="${profile.exposureTime || ''}"`,
+    `-metadata Flash="${profile.flash || '0'}"`,
+    `-metadata ColorSpace="${profile.colorSpace || 'sRGB'}"`,
+    `-metadata XResolution="${profile.xResolution || '72'}"`,
+    `-metadata YResolution="${profile.yResolution || '72'}"`,
+    `-metadata MeteringMode="${profile.meteringMode || '0'}"`,
+    `-metadata WhiteBalance="${profile.whiteBalance || '0'}"`,
+    `-metadata SceneCaptureType="${profile.sceneCaptureType || '0'}"`,
+  ];
+
+  if (gps && gps.lat !== null) {
+    args.push(
+      `-metadata GPSLatitude="${Math.abs(gps.lat)}"`,
+      `-metadata GPSLatitudeRef="${gps.lat >= 0 ? 'N' : 'S'}"`,
+      `-metadata GPSLongitude="${Math.abs(gps.lon)}"`,
+      `-metadata GPSLongitudeRef="${gps.lon >= 0 ? 'E' : 'W'}"`,
+      `-metadata GPSAltitude="${gps.alt || 0}"`,
+      `-metadata GPSAltitudeRef="0"`,
+    );
+  }
+
+  return args.join(' ');
+}
+
+function formatExifDate(dateStr) {
+  const d = new Date(dateStr);
+  const pad = (n) => String(n).padStart(2, '0');
+  return `${d.getFullYear()}:${pad(d.getMonth()+1)}:${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
+}
+
+function generateRealisticDate() {
+  // Random date within last 30 days
+  const now    = Date.now();
+  const offset = Math.floor(Math.random() * 30 * 24 * 3600 * 1000);
+  return new Date(now - offset).toISOString();
+}
+
+export default { spoofMetadata, spoofVideoMetadata, DeviceProfiles, GPSPresets };

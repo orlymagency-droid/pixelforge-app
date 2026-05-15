@@ -1,0 +1,120 @@
+apply plugin: "com.android.application"
+apply plugin: "org.jetbrains.kotlin.android"
+apply plugin: "com.facebook.react"
+
+/**
+ * React Native configuration
+ */
+react {
+    hermesEnabled = true
+    enableBundleForVariant = { variant -> variant.name != "debug" }
+}
+
+android {
+    ndkVersion rootProject.ext.ndkVersion
+    buildToolsVersion rootProject.ext.buildToolsVersion
+    compileSdk rootProject.ext.compileSdkVersion
+
+    namespace "com.pixelforgeai"
+
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+    }
+
+    kotlinOptions {
+        jvmTarget = "17"
+    }
+
+    defaultConfig {
+        applicationId "com.pixelforgeai"
+        minSdkVersion rootProject.ext.minSdkVersion
+        targetSdkVersion rootProject.ext.targetSdkVersion
+        versionCode 1
+        versionName "1.0.0"
+
+        // Enable multidex (required for large dependency sets)
+        multiDexEnabled true
+
+        // Vectorize & optimize
+        vectorDrawables.useSupportLibrary = true
+
+        // NDK ABI filters — keep only modern architectures
+        ndk {
+            abiFilters "arm64-v8a", "x86_64"
+        }
+
+        // TFLite asset compression
+        aaptOptions {
+            noCompress "tflite", "lite"
+        }
+    }
+
+    signingConfigs {
+        debug {
+            storeFile file('debug.keystore')
+            storePassword 'android'
+            keyAlias 'androiddebugkey'
+            keyPassword 'android'
+        }
+        release {
+            if (project.hasProperty('MYAPP_UPLOAD_STORE_FILE')) {
+                storeFile file(MYAPP_UPLOAD_STORE_FILE)
+                storePassword MYAPP_UPLOAD_STORE_PASSWORD
+                keyAlias MYAPP_UPLOAD_KEY_ALIAS
+                keyPassword MYAPP_UPLOAD_KEY_PASSWORD
+            }
+        }
+    }
+
+    buildTypes {
+        debug {
+            signingConfig signingConfigs.debug
+        }
+        release {
+            signingConfig signingConfigs.release
+            minifyEnabled true
+            shrinkResources false      // keep TFLite assets
+            proguardFiles getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro"
+        }
+    }
+
+    // Packaging options for TFLite + FFmpeg
+    packaging {
+        jniLibs {
+            useLegacyPackaging true
+            pickFirsts += ["**/libc++_shared.so", "**/libfbjni.so"]
+        }
+        resources {
+            pickFirsts += ["META-INF/DEPENDENCIES", "META-INF/LICENSE"]
+            excludes += ["META-INF/*.kotlin_module"]
+        }
+    }
+}
+
+dependencies {
+    // React Native
+    implementation("com.facebook.react:react-android")
+    implementation("com.facebook.react:hermes-android")
+
+    // AndroidX & Multidex
+    implementation "androidx.multidex:multidex:2.0.1"
+    implementation "androidx.core:core-ktx:1.13.1"
+    implementation "androidx.appcompat:appcompat:1.7.0"
+
+    // TFLite GPU delegate
+    implementation("org.tensorflow:tensorflow-lite:2.16.1")
+    implementation("org.tensorflow:tensorflow-lite-gpu:2.16.1")
+    implementation("org.tensorflow:tensorflow-lite-gpu-delegate-plugin:0.4.4")
+    implementation("org.tensorflow:tensorflow-lite-support:0.4.4")
+
+    // FFmpegKit (full build with all codecs)
+    implementation("com.arthenica:ffmpeg-kit-full:6.0-2")
+}
+
+// ProGuard rules appended programmatically
+afterEvaluate {
+    tasks.named("generateReleaseLintModel").configure {
+        dependsOn("bundleReleaseJsAndAssets")
+    }
+}
